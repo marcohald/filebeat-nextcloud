@@ -1,7 +1,7 @@
 # filebeat-nextcloud
 This is tested against Nextcloud 20 
 
-The parsing is not ideal, but it should matched all events in my environment.
+The parsing is not ideal, but it matched all events in my environment.
 
 If you would like to use this with docker, make sure that all user can read the audit log.
 
