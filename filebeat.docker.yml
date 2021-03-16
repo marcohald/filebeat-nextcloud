@@ -1,0 +1,172 @@
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/www/html/data/audit.log
+    json.add_error_key: true
+    json.message_key: message
+setup.ilm.enabled: false
+setup.template.settings:
+  index.number_of_shards: 1
+setup.kibana:
+  host: 'http://ip:5601'
+output.elasticsearch.index: 'nextcloud-audit-%{[agent.version]}-%{+yyyy.MM.dd}'
+setup.template.name: nextcloud-audit
+setup.template.pattern: nextcloud-audit-*
+output.elasticsearch:
+  hosts: 'ip:9200'
+  enabled: true
+processors:
+  - timestamp:
+      field: json.time
+      layouts:
+        - '2006-01-02T15:04:05-07:00'
+  - rename:
+      fields:
+        - from: json.url
+          to: url.path
+        - from: json.message
+          to: message
+        - from: json.userAgent
+          to: user_agent.original
+      when:
+        has_fields:
+          - json.userAgent
+      ignore_missing: true
+      fail_on_error: false
+      
+  - if:
+      regexp:
+        message: '(.*?)\(Share ID: (\d*?)\)'
+    then:
+         - if:
+            regexp:
+                message: 'The folder(.*?)has been shared(.*?)\(Share ID: (\d*?)\)'      
+           then:
+              - dissect:
+                  tokenizer: 'The folder %{nextcloud.data}'
+                  field: message
+                  target_prefix: ''
+                  fail_on_error: true
+              - add_fields: 
+                    target: nextcloud
+                    fields:
+                        event: "Folder shared"          
+           else:
+             - if:
+                regexp:
+                    message: 'The folder(.*?)has been unshared(.*?)\(Share ID: (\d*?)\)'      
+               then:
+                  - dissect:
+                      tokenizer: 'The folder %{nextcloud.data}'
+                      field: message
+                      target_prefix: ''
+                      fail_on_error: true
+                  - add_fields: 
+                        target: nextcloud
+                        fields:
+                            event: "Folder unshared"          
+               else:
+                 - if:
+                    regexp:
+                        message: 'The file(.*?)has been shared(.*?)\(Share ID: (\d*?)\)'      
+                   then:
+                      - dissect:
+                          tokenizer: 'The file %{nextcloud.data}'
+                          field: message
+                          target_prefix: ''
+                          fail_on_error: true
+                      - add_fields: 
+                            target: nextcloud
+                            fields:
+                                event: "File shared"          
+                   else:
+                     - if:
+                        regexp:
+                            message: 'The file(.*?)has been unshared(.*?)\(Share ID: (\d*?)\)'      
+                       then:
+                          - dissect:
+                              tokenizer: 'The file %{nextcloud.data}'
+                              field: message
+                              target_prefix: ''
+                              fail_on_error: true
+                          - add_fields: 
+                                target: nextcloud
+                                fields:
+                                    event: "File unshared"          
+
+
+           
+    else:
+        - if:
+            regexp:
+                message: '(.*?): (.*?)'
+          then:
+              - dissect:
+                  tokenizer: '%{nextcloud.event}: %{nextcloud.data}'
+                  field: message
+                  target_prefix: ''
+                  fail_on_error: true
+          else:
+              - if:
+                  contains:
+                    message: Logout occurred
+                then:
+                  - copy_fields:
+                      fields:
+                        - from: message
+                          to: nextcloud.event
+                      fail_on_error: false
+                      ignore_missing: true
+                else:
+                  - if: 
+                        regexp:
+                          message: '^The shared folder (.*?) has been accessed.$'
+                    then:
+                        - add_fields: 
+                            target: nextcloud
+                            fields:
+                                event: "shared folder has been accessed"
+                        - dissect: 
+                              tokenizer: 'The shared folder with the %{nextcloud.data} has been accessed.'
+                              field: message
+                              target_prefix: ''
+                              fail_on_error: true
+                    else:
+                      - if: 
+                            contains:
+                              message: 'The permissions of the shared folder '
+                        then:
+                            - add_fields: 
+                                target: nextcloud
+                                fields:
+                                    event: "Permission shared Folder changed"
+                            - dissect: 
+                                  tokenizer: 'The permissions of the shared folder %{nextcloud.data}'
+                                  field: message
+                                  target_prefix: ''
+                                  fail_on_error: true                
+                        else:
+                          - if: 
+                                contains:
+                                  message: 'The shared file with the token '
+                            then:
+                                - add_fields: 
+                                    target: nextcloud
+                                    fields:
+                                        event: "Shared File accessed"
+                                - dissect: 
+                                      tokenizer: 'The shared file with the %{nextcloud.data}'
+                                      field: message
+                                      target_prefix: ''
+                                      fail_on_error: true    
+                            else:
+                              - if: 
+                                    contains:
+                                      message: 'Email address changed '
+                                then:
+                                    - dissect: 
+                                          tokenizer: '%{nextcloud.event} for %{nextcloud.data}'
+                                          field: message
+                                          target_prefix: ''
+                                          fail_on_error: true                                      
